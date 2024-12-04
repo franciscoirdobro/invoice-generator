@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice Generator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    .form-container {
+      max-width: 600px; /* Limit form width */
+      margin: 0 auto; /* Center form horizontally */
+    }
+    
+    input, textarea {
+      width: 100%;
+      margin: 10px 0;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    .button {
+      padding: 10px 15px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    .button:hover {
+      background-color: #0056b3;
+    }
+    #previewContainer {
+      margin-top: 20px;
+      max-width: 794px; /* A4 width */
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .page {
+      width: 794px; /* A4 width in pixels */
+      height: 1123px; /* A4 height in pixels */
+      border: 1px solid #ddd; /* Borders for preview */
+      padding: 30px;
+      margin: 10px auto;
+      box-sizing: border-box;
+      background-color: white;
+      position: relative;
+    }
+    .preview-header {
+      font-weight: bold;
+      font-size: 36px; /* Larger font size for "Invoice" */
+      margin-bottom: 20px;
+      text-align: left;
+    }
+    .info-block {
+      margin-top: 10px;
+      margin-bottom: 5px;
+    }
+    .info-block p {
+      margin: 5px 0; /* Adjusted line spacing */
+    }
+    .from-bill-to-section {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 25px;
+    }
+    .from-section, .bill-to-section {
+      font-size: 14px;
+      line-height: 1.6;
+      width: 48%; /* Equal width for both sections */
+    }
+    .from-section p, .bill-to-section p {
+      margin: 0;
+    }
+    .from-section strong, .bill-to-section strong {
+      font-weight: bold;
+      font-size: 16px;
+    }
+    .due-text {
+      text-align: right;
+      font-style: italic;
+      margin-top: 20px;
+      font-size: 12px;
+      color: #555;
+    }
+    .total-block {
+      text-align: right;
+      font-weight: bold;
+      font-size: 20px;
+      margin-top: 20px;
+    }
+    .logo {
+      position: absolute;
+      top: 30px; /* Adjusted to align with top margin */
+      right: 30px; /* Adjusted to align with right margin */
+      max-width: 120px; /* Adjusted size */
+      max-height: 80px; /* Adjusted size */
+      object-fit: contain;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 12px;
+    }
+    th {
+      background-color: #f4f4f4;
+      text-align: center;
+    }
+    td {
+      text-align: left;
+    }
+    .footer-text {
+      font-size: 10px;
+      color: gray;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <div class="form-container">
+    <h1>Invoice Generator</h1>
+    
+    <label for="invoiceNumber">Invoice Number:<br><p style="color: grey; font-size: 10px">Format: NAME-CURRENCY-MONTH-YEAR</p></label>
+    <input id="invoiceNumber" type="text" placeholder="Enter invoice number">
+
+    <label for="invoiceMonth">Invoice Month:</label>
+    <input id="invoiceMonth" type="text" placeholder="Enter invoice month">
+
+    <label for="billTo">Bill To:</label>
+    <input id="billTo" type="text" placeholder="Enter bill to information">
+
+    <p>Paste rows from an Excel sheet (Title, Unit, Unit Cost):</p>
+    <textarea id="excelInput" rows="10" cols="50" placeholder="Paste Excel data here..."></textarea>
+    <button class="button" onclick="generatePreview()">Generate Invoice</button>
+    <button class="button" onclick="generatePDF()">Download PDF</button>
+  </div>
+
+    <div id="previewContainer"></div>
+
+    <script>
+    const logoBase64 = "https://i.imgur.com/U5hAUcw.png";
+
+    function formatDate(date) {
+      const day = date.getDate().toString().padStart(2, '0');
+      const month = date.toLocaleString('en-US', { month: 'long' });
+      const year = date.getFullYear();
+      return `${day} ${month} ${year}`;
+    }
+
+    function addOneMonth(date) {
+      const result = new Date(date);
+      result.setMonth(result.getMonth() + 1);
+      return formatDate(result);
+    }
+
+    function cleanNumber(input) {
+      return parseFloat(input.replace(/,/g, ''));
+    }
+
+    function formatNumberWithCommas(number) {
+      const formatted = Math.abs(number).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return number < 0 ? `($${formatted})` : `$${formatted}`;
+    }
+
+    function generatePreview() {
+      const invoiceNumber = document.getElementById('invoiceNumber').value || "N/A";
+      const invoiceMonth = document.getElementById('invoiceMonth').value || "N/A";
+      const billTo = document.getElementById('billTo').value || "N/A";
+      const issueDate = formatDate(new Date());
+      const dueDate = addOneMonth(new Date());
+      const input = document.getElementById('excelInput').value;
+
+      const rows = input.trim().split('\n').map(row => {
+        const [title, unit, unitCost] = row.split('\t');
+        const cleanedUnit = cleanNumber(unit || "0");
+        const cleanedUnitCost = cleanNumber(unitCost || "0");
+        const total = cleanedUnit * cleanedUnitCost;
+        return { 
+          title, 
+          unit: cleanedUnit, 
+          unitCost: cleanedUnitCost, 
+          total 
+        };
+      });
+
+      const totalAmount = rows.reduce((sum, item) => sum + item.total, 0);
+      const previewContainer = document.getElementById('previewContainer');
+      previewContainer.innerHTML = '';
+
+      const rowsPerPage = 15;
+      const pages = Math.ceil(rows.length / rowsPerPage);
+
+      for (let page = 0; page < pages; page++) {
+        const pageRows = rows.slice(page * rowsPerPage, (page + 1) * rowsPerPage);
+        const pageDiv = document.createElement('div');
+        pageDiv.classList.add('page');
+
+        const isLastPage = page === pages - 1;
+        const isFooterOnNewPage = rows.length >= 12 && rows.length <= 15;
+
+        pageDiv.innerHTML = `
+          ${logoBase64 && page === 0 ? `<img src="${logoBase64}" class="logo">` : ''}
+          ${page === 0 ? `
+            <div class="preview-header">Invoice</div>
+            <div class="info-block">
+              <p><strong>Invoice Number:</strong> ${invoiceNumber}</p>
+              <p><strong>Issue Date:</strong> ${issueDate}</p>
+              <p><strong>Invoice Month:</strong> ${invoiceMonth}</p>
+            </div>
+            <div class="from-bill-to-section">
+              <div class="from-section"><strong>From:</strong><br>Reap Technologies Limited</div>
+              <div class="bill-to-section"><strong>Bill To:</strong><br>${billTo}</div>
+            </div>
+          ` : ''}
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th style="text-align: center;">Units</th>
+                <th style="text-align: center;">Unit Price</th>
+                <th style="text-align: right;">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pageRows.map(item => `
+                <tr>
+                  <td>${item.title}</td>
+                  <td style="text-align: center;">${item.unit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style="text-align: center;">${formatNumberWithCommas(item.unitCost)}</td>
+                  <td style="text-align: right;">${formatNumberWithCommas(item.total)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ${
+            isLastPage
+              ? `<p class="total-block">Total Amount: ${formatNumberWithCommas(totalAmount)}</p>
+                 <p class="due-text">Due Date: ${dueDate}</p>`
+              : ''
+          }
+        `;
+
+        previewContainer.appendChild(pageDiv);
+
+        if (isFooterOnNewPage && isLastPage) {
+          const footerPageDiv = document.createElement('div');
+          footerPageDiv.classList.add('page');
+          footerPageDiv.innerHTML = `
+            <div class="footer-text">
+              <p>All amounts are in USD unless otherwise specified.</p>
+              <p>Payment to:</p>
+              <p>Beneficiary Name: Reap Technologies Limited</p>
+              <p>Bank Address: 18th Floor, The Center, 99 Queen’s Road Central, Central, Hong Kong</p>
+              <p>SWIFT Code: DHBKHKHH</p>
+              <p>HK Bank Code: 016</p>
+              <p>Branch Code: 478</p>
+              <p>Bank Account Number: 001153663</p>
+              <p>ERC20 USDC/USDT: 0x7c42fC9fBee1982Cb5d8Faef2698aA70666e888b</p>
+              <p>TRC20 USDT: TKVFC8Q8TSzeHmJ71SfLLFtMPYNxuaWeTy</p>
+            </div>
+          `;
+          previewContainer.appendChild(footerPageDiv);
+        } else if (isLastPage && !isFooterOnNewPage) {
+          const footerDiv = document.createElement('div');
+          footerDiv.classList.add('footer-text');
+          footerDiv.innerHTML = `
+            <p>All amounts are in USD unless otherwise specified.</p>
+            <p>Payment to:</p>
+            <p>Beneficiary Name: Reap Technologies Limited</p>
+            <p>Bank Address: 18th Floor, The Center, 99 Queen’s Road Central, Central, Hong Kong</p>
+            <p>SWIFT Code: DHBKHKHH</p>
+            <p>HK Bank Code: 016</p>
+            <p>Branch Code: 478</p>
+            <p>Bank Account Number: 001153663</p>
+            <p>ERC20 USDC/USDT: 0x7c42fC9fBee1982Cb5d8Faef2698aA70666e888b</p>
+            <p>TRC20 USDT: TKVFC8Q8TSzeHmJ71SfLLFtMPYNxuaWeTy</p>
+          `;
+          pageDiv.appendChild(footerDiv);
+        }
+      }
+    }
+
+    async function generatePDF() {
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p', 'pt', 'a4');
+  const pages = document.querySelectorAll('.page');
+
+  for (let i = 0; i < pages.length; i++) {
+    const pageElement = pages[i];
+
+    // Temporarily remove borders for PDF generation
+    pageElement.style.border = "none";
+
+    if (i > 0) pdf.addPage();
+
+    // Use html2canvas with CORS handling
+    await html2canvas(pageElement, {
+      backgroundColor: null, // Retain transparent background
+      useCORS: true // Enable CORS for external images
+    }).then(canvas => {
+      const imgData = canvas.toDataURL('image/png');
+      const imgWidth = pdf.internal.pageSize.getWidth() - 60; // Adjust margins
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      pdf.addImage(imgData, 'PNG', 30, 30, imgWidth, imgHeight);
+    });
+
+    // Restore borders after PDF generation
+    pageElement.style.border = "1px solid #ddd";
+  }
+
+  pdf.save('invoice.pdf');
+}
+
+
+  </script>
+</body>
+</html>
